@@ -42,7 +42,7 @@ public class ByteArrayUtil {
         }
 
         // 2. 处理剩余位数
-        if (remainingBits > 0 && fullBytes < 4) {
+        if (remainingBits > 0) {
             byte address = ipAddress[fullBytes];
             int unsignedByte = address & 0xFF;
             // 仅复制剩余位数

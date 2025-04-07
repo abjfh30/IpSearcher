@@ -2,141 +2,172 @@ package com.abjfh.IpDATrie;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import lombok.Data;
-import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 
-@Slf4j
 public class PrefixNodeTrie<V> {
-    Node root = new Node(0);
+    Node root;
     ArrayList<V> list = new ArrayList<>();
 
     @Data
-    protected static class Node {
+    protected static class Node implements Cloneable {
         Int2ObjectOpenHashMap<Node> children = new Int2ObjectOpenHashMap<>();
         byte[] shareKeys;
         int baseIndex;
         int depth;
         int tailIndex;
-        boolean isLeaf; // 内联叶子节点状态
 
         public Node(int depth) {
             this.depth = depth;
-            this.isLeaf = false;
         }
 
-        public void setTailIndex(int tailIndex) {
-            this.tailIndex = tailIndex;
-            this.isLeaf = tailIndex < 0;
+        @Override
+        protected Node clone() throws CloneNotSupportedException {
+            return (Node) super.clone();
+        }
+
+        protected boolean isLeaf() {
+            return tailIndex > 0;
+        }
+
+        protected void clear() {
+            children = new Int2ObjectOpenHashMap<>();
+            shareKeys = null;
+            baseIndex = 0;
+            tailIndex = 0;
         }
     }
 
-    public boolean putIfAbsent(byte[] keys, V value) {
+    public boolean putIfAbsent(byte[] keys, V value) throws CloneNotSupportedException {
+        if (root == null) {
+            root = new Node(0);
+            root.shareKeys = Arrays.copyOf(keys, keys.length);
+            list.add(value);
+            root.tailIndex = list.size();
+            return true;
+        }
         Node currentNode = root;
-        while (currentNode.depth < keys.length) {
-            if (currentNode.shareKeys != null) {
-                int mismatch = Arrays.mismatch(currentNode.shareKeys, 0, currentNode.shareKeys.length, keys, currentNode.depth, keys.length);
-                if (mismatch == -1) {
-                    return false;
-                }
-                int nextDepth = mismatch + currentNode.depth;
+        int keyLength = keys.length;
+        while (true) {
 
-                if (nextDepth >= keys.length) {
-                    return false;
-                } else if (nextDepth >= currentNode.shareKeys.length) {
-                    Node node = currentNode.children.get(nextDepth);
-                    if (node == null) {
-                        node = new Node(nextDepth);
-                        node.isLeaf = true;
-                        if (keys.length - 1 != nextDepth) {
-                            node.shareKeys = Arrays.copyOfRange(keys, nextDepth, keys.length);
-                        }
-                        list.add(value);
-                        node.tailIndex = -list.size();
-                        currentNode.children.put(keys[nextDepth], node);
-                        return true;
+            if (currentNode.shareKeys != null) {
+
+                int mismatch = Arrays.mismatch(
+                        currentNode.shareKeys, 0, currentNode.shareKeys.length,
+                        keys, currentNode.depth, keyLength
+                );
+                int minLength = Math.min(currentNode.shareKeys.length, keyLength - currentNode.depth);
+
+                int currentKeysIdx = currentNode.depth + mismatch;
+                if (mismatch >= 0 && mismatch < minLength) {
+                    // 备份当前节点
+                    Node cloneOriginNode = currentNode.clone();
+                    currentNode.clear();
+                    // 将cloneOriginNode添加到currentNode的子节点
+                    currentNode.children.put(cloneOriginNode.shareKeys[mismatch], cloneOriginNode);
+
+                    // 调整currentNode的shareKeys
+                    if (mismatch > 0) {
+                        currentNode.shareKeys = Arrays.copyOfRange(cloneOriginNode.shareKeys, 0, mismatch);
                     }
-                } else {
-                    splitShareKeys(currentNode, nextDepth);
-                    Node node = new Node(nextDepth);
-                    node.isLeaf = true;
-                    if (keys.length - 1 != nextDepth) {
-                        node.shareKeys = Arrays.copyOfRange(keys, nextDepth, keys.length);
+
+                    // 调整cloneOriginNode的shareKeys 和 depth
+                    if (mismatch + 1 < cloneOriginNode.shareKeys.length) {
+                        cloneOriginNode.shareKeys = Arrays.copyOfRange(
+                                cloneOriginNode.shareKeys, mismatch + 1, cloneOriginNode.shareKeys.length
+                        );
+                    } else {
+                        cloneOriginNode.shareKeys = null;
+                    }
+                    cloneOriginNode.depth += mismatch + 1;
+
+                    // 创建新节点处理剩余keys
+                    Node nextNode = new Node(cloneOriginNode.depth);
+                    if (nextNode.depth < keys.length) {
+                        nextNode.shareKeys = Arrays.copyOfRange(keys, nextNode.depth, keyLength);
                     }
                     list.add(value);
-                    node.tailIndex = -list.size();
-                    currentNode.children.put(keys[nextDepth], node);
+                    nextNode.tailIndex = list.size();
+                    currentNode.children.put(keys[currentKeysIdx], nextNode);
                     return true;
-                }
 
-            } else if (currentNode.children.isEmpty()) {
-                currentNode.shareKeys = keys;
-                currentNode.isLeaf = true;
-                list.add(value);
-                currentNode.tailIndex = -list.size();
-                return true;
+                } else if (mismatch == currentNode.shareKeys.length) {
+                    if (currentNode.isLeaf()) {
+                        return false;
+                    }
+
+                    // 继续处理后续字节
+                    Node nextNode = currentNode.children.get(keys[currentKeysIdx]);
+                    if (nextNode == null) {
+                        // 创建新节点处理剩余keys
+                        nextNode = new Node(currentNode.depth + mismatch + 1);
+                        currentNode.children.put(keys[currentKeysIdx], nextNode);
+                        if (nextNode.depth < keys.length) {
+                            nextNode.shareKeys = Arrays.copyOfRange(keys, nextNode.depth, keyLength);
+                        }
+                        list.add(value);
+                        nextNode.tailIndex = list.size();
+                        return true;
+                    } else {
+                        currentNode = nextNode;
+                    }
+                } else {
+                    // 完全匹配
+                    return false;
+                }
+            } else {
+                if (currentNode.isLeaf() || currentNode.depth >= keyLength) {
+                    return false;
+                }
+                // 无shareKeys，继续处理后续字节
+                Node nextNode = currentNode.children.get(keys[currentNode.depth]);
+                if (nextNode == null) {
+
+                    nextNode = new Node(currentNode.depth + 1);
+                    if (nextNode.depth + 1 < keys.length) {
+                        nextNode.shareKeys = Arrays.copyOfRange(keys, nextNode.depth + 1, keyLength);
+                    }
+                    list.add(value);
+                    nextNode.tailIndex = list.size();
+                    currentNode.children.put(keys[nextNode.depth], nextNode);
+                    return true;
+                } else {
+                    currentNode = nextNode;
+                }
             }
         }
-        return false;
-    }
-
-    private void splitShareKeys(Node currentNode, int newShareKeyLength) {
-        int originTailIndex = currentNode.tailIndex;
-        byte[] originShareKeys = currentNode.shareKeys;
-        Int2ObjectOpenHashMap<Node> originChildren = currentNode.children;
-
-        currentNode.children = new Int2ObjectOpenHashMap<>();
-        currentNode.shareKeys = null;
-        currentNode.setTailIndex(0);
-
-        if (newShareKeyLength > 0) {
-            currentNode.shareKeys = Arrays.copyOfRange(originShareKeys, 0, newShareKeyLength);
-        }
-
-        Node node2OriginPath = new Node(currentNode.depth + newShareKeyLength);
-        node2OriginPath.setTailIndex(originTailIndex);
-        node2OriginPath.children = originChildren;
-
-        int suffixOriginShareKeyLength = originShareKeys.length - newShareKeyLength - 1;
-        if (suffixOriginShareKeyLength > 0) {
-            node2OriginPath.shareKeys = Arrays.copyOfRange(
-                    originShareKeys,
-                    newShareKeyLength + 1,
-                    originShareKeys.length
-            );
-        }
-
-        currentNode.children.put(originShareKeys[newShareKeyLength], node2OriginPath);
     }
 
     public V get(byte[] keys) {
+        if (root == null) return null;
         Node currentNode = root;
-        int nextDepth;
-        while (currentNode.depth < keys.length) {
+        int keyLength = keys.length;
+        while (currentNode.depth < keyLength) {
             if (currentNode.shareKeys != null) {
-                int mismatch = Arrays.mismatch(currentNode.shareKeys, 0, currentNode.shareKeys.length, keys, currentNode.depth, keys.length);
-                nextDepth = mismatch + currentNode.depth;
+                int mismatch = Arrays.mismatch(
+                        currentNode.shareKeys, 0, currentNode.shareKeys.length,
+                        keys, currentNode.depth, keyLength
+                );
+
+                int currentKeysIdx = currentNode.depth + mismatch;
                 if (mismatch == currentNode.shareKeys.length) {
-                    if (currentNode.isLeaf) {
-                        return list.get(-currentNode.tailIndex - 1);
+                    if (currentNode.isLeaf()) {
+                        return list.get(currentNode.tailIndex - 1);
+                    } else {
+                        currentNode = currentNode.children.get(keys[currentKeysIdx]);
+                        if (currentNode == null) return null;
                     }
-                }
-            } else if (currentNode.isLeaf) {
-                return list.get(-currentNode.tailIndex - 1);
+                } else return null;
             } else {
-                nextDepth = currentNode.depth + 1;
-            }
-            if (nextDepth >= keys.length) {
-                return null;
-            }
-            currentNode = currentNode.children.get(keys[nextDepth]);
-            if (currentNode == null) {
-                return null;
+                if (currentNode.isLeaf()) {
+                    return list.get(currentNode.tailIndex - 1);
+                } else {
+                    currentNode = currentNode.children.get(keys[currentNode.depth]);
+                    if (currentNode == null) return null;
+                }
             }
         }
-
         return null;
     }
-
 }

@@ -6,14 +6,19 @@ import inet.ipaddr.ipv6.IPv6Address;
 import inet.ipaddr.ipv6.IPv6AddressSeqRange;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedList;
+import java.util.Queue;
+import java.util.Random;
 
+@Slf4j
 public class PrefixDATrie<V> {
     Int2ObjectOpenHashMap<int[]> map;
     ArrayList<V> list;
@@ -78,11 +83,11 @@ public class PrefixDATrie<V> {
                     }
                     value.baseIndex = s;
                 }
-                if (value.isLeaf) {
-                    nextSegment[value.baseIndex & 7] = value.tailIndex;
-                } else {
-                    queue.add(value);
-                }
+//                if (value.isLeaf) {
+//                    nextSegment[value.baseIndex & 7] = value.tailIndex;
+//                } else {
+//                    queue.add(value);
+//                }
             }
         }
 
@@ -120,22 +125,28 @@ public class PrefixDATrie<V> {
 
     public static void main(String[] args) throws UnknownHostException {
         PrefixNodeTrie<String[]> trie = new PrefixNodeTrie<>();
-        try (BufferedReader br = new BufferedReader(new FileReader("BGP_INFO_IPV6.csv"))) {
+        try (BufferedReader br = new BufferedReader(new FileReader("data\\BGP_INFO_IPV6.csv"))) {
             br.lines().forEach(line -> {
                 String[] split = line.split(",");
                 IPv6Address sip = new IPAddressString(split[0]).getAddress().toIPv6();
                 IPv6Address eip = new IPAddressString(split[1]).getAddress().toIPv6();
                 for (IPv6Address iPv6Address : new IPv6AddressSeqRange(sip, eip).spanWithPrefixBlocks()) {
                     byte[] bytes = iPv6Address.getBytes();
-                    trie.putIfAbsent(ByteArrayUtil.mask2ByteArray(bytes, iPv6Address.getPrefixLength()), split);
+                    try {
+                        if (!trie.putIfAbsent(ByteArrayUtil.mask2ByteArray(bytes, iPv6Address.getPrefixLength()), split)) {
+                            log.info("iPv6Address:{}", iPv6Address);
+                        }
+                    } catch (CloneNotSupportedException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
             });
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        PrefixDATrie<String[]> daTrie = new PrefixDATrie<>(trie);
-        daTrie.search("2001:503:e239::");
-        System.out.println(Arrays.toString(trie.get(ByteArrayUtil.mask2ByteArray(InetAddress.getByName("2001:503:e239::").getAddress(), 48))));
+//        PrefixDATrie<String[]> daTrie = new PrefixDATrie<>(trie);
+//        daTrie.search("2001:503:e239::");
+//        System.out.println(Arrays.toString(trie.get(ByteArrayUtil.mask2ByteArray(InetAddress.getByName("2001:503:e239::").getAddress(), 48))));
     }
 
 }

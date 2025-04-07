@@ -66,7 +66,7 @@ public class ByteArrayUtil {
                 }
                 break;
             }
-            case 32: {
+            case 16: {
                 if ((prefixLength > 128)) {
                     throw new IllegalArgumentException("IPV4 address prefixLength must be less than 128");
                 }
